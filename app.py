@@ -1,37 +1,192 @@
+# app.py
+
 import streamlit as st
 import pandas as pd
-from rebalance import calculate_allocation, rebalance_portfolio
-from openai_integration import get_rebalancing_explanation
-from dotenv import load_dotenv
 import os
+from sqlalchemy import create_engine
+import yfinance as yf
+from db import create_tables  # Assuming create_tables is in db.py
+import seaborn as sns
+import matplotlib.pyplot as plt
 
-# Load environment variables from .env file
-load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
-print("API Key:", api_key)  # This should print your API key in the console
+# Check if DATABASE_URL is set
+database_url = os.getenv('DATABASE_URL')
+if not database_url:
+    st.error("DATABASE_URL is not set. Please check your environment variables.")
+    st.stop()
+
+# Initialize database tables and show connection status
+try:
+    create_tables()
+    st.success("Connected to the database successfully.")
+except Exception as e:
+    st.error(f"Failed to connect to the database: {e}")
 
 # App Title
-st.title("Portfolio Rebalancing App")
+st.title("Stock Data App")
 
-# Upload portfolio CSV
-uploaded_file = st.file_uploader("Upload your portfolio CSV", type=["csv"])
+# List of tickers for the dropdown
+tickers = ['AAPL', 'AMZN', 'GOOG', 'MSFT', 'TSLA']
 
-if uploaded_file is not None:
-    # Read and display the portfolio
-    portfolio = pd.read_csv(uploaded_file)
-    st.write("Your Portfolio", portfolio)
-    
-    # Calculate and display allocation
-    portfolio, total_value = calculate_allocation(portfolio)
-    st.write("Current Allocation", portfolio)
+# Select period and interval for correlation matrix
+st.header("Correlation Matrix of Selected Stocks")
+periods = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max']
+intervals = ['1d', '1wk', '1mo']
 
-    # Set target allocation for rebalancing
-    target_allocation = {'Stocks': 0.60, 'Bonds': 0.40}
-    
-    # Rebalance the portfolio
-    rebalanced_portfolio = rebalance_portfolio(portfolio, total_value, target_allocation)
-    st.write("Rebalanced Portfolio", rebalanced_portfolio)
-    
-    # Get explanation from OpenAI
-    explanation = get_rebalancing_explanation(rebalanced_portfolio, target_allocation)
-    st.write("Explanation from OpenAI:", explanation)
+selected_period_corr = st.selectbox("Select a period for correlation", periods, index=2)  # Default to '1mo'
+selected_interval_corr = st.selectbox("Select an interval for correlation", intervals, index=0)  # Default to '1d'
+
+# Button to fetch and display correlation matrix
+if st.button("Display Correlation Matrix"):
+    # Function to fetch data for correlation matrix
+    def fetch_data_for_correlation(tickers, period, interval):
+        engine = create_engine(database_url)
+        all_data = pd.DataFrame()
+        for symbol in tickers:
+            # Check if data exists in the database
+            query = """
+            SELECT * FROM historical_stock_data
+            WHERE symbol = %s AND period = %s AND interval = %s
+            ORDER BY date ASC
+            """
+            params = (symbol, period, interval)
+            df = pd.read_sql_query(query, engine, params=params)
+
+            if df.empty:
+                # Fetch data from yfinance and insert into the database
+                ticker = yf.Ticker(symbol)
+                hist = ticker.history(period=period, interval=interval)
+                if hist.empty:
+                    st.error(f"No data found for {symbol} with the selected parameters.")
+                    continue
+                hist.reset_index(inplace=True)
+                hist['symbol'] = symbol
+                hist['period'] = period
+                hist['interval'] = interval
+                date_column = 'Date' if 'Date' in hist.columns else 'Datetime'
+                hist.rename(columns={date_column: 'date', 'Close': 'close'}, inplace=True)
+                hist['date'] = pd.to_datetime(hist['date']).dt.tz_localize(None)  # Remove timezone
+                hist = hist[['symbol', 'date', 'period', 'interval', 'close']]
+                # Insert data into the database
+                try:
+                    hist.to_sql('historical_stock_data', engine, if_exists='append', index=False, method='multi')
+                    st.success(f"{symbol} stock data imported successfully for correlation.")
+                    df = hist
+                except Exception as e:
+                    st.error(f"Failed to insert data for {symbol} into the database: {e}")
+                    continue
+            else:
+                # Process data fetched from the database
+                df['date'] = pd.to_datetime(df['date']).dt.tz_localize(None)  # Remove timezone
+
+            # Prepare df for joining
+            df = df[['date', 'close']].copy()
+            df.set_index('date', inplace=True)
+            df.rename(columns={'close': symbol}, inplace=True)
+            df.index = df.index.tz_localize(None)  # Ensure tz-naive index
+
+            # Join data
+            if all_data.empty:
+                all_data = df
+            else:
+                all_data.index = all_data.index.tz_localize(None)  # Ensure tz-naive index
+                all_data = all_data.join(df, how='outer')
+        return all_data
+
+    # Fetch data and compute correlation matrix
+    stock_data = fetch_data_for_correlation(tickers, selected_period_corr, selected_interval_corr)
+    if not stock_data.empty:
+        stock_data = stock_data.dropna()
+        corr_matrix = stock_data.corr()
+        st.write("### Correlation Matrix")
+
+        # Display the correlation matrix as a heatmap
+        fig, ax = plt.subplots()
+        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', ax=ax)
+        st.pyplot(fig)
+    else:
+        st.warning("No data available to display correlation matrix. Please try different parameters.")
+
+st.write("---")  # Separator
+
+# Select tickers from dropdowns
+selected_ticker1 = st.selectbox("Select the first stock ticker", tickers, key='ticker1')
+selected_ticker2 = st.selectbox("Select the second stock ticker", tickers, key='ticker2')
+
+# Select period and interval for stock data
+selected_period = st.selectbox("Select a period for stock data", periods, index=2, key='period_stock')  # Default to '1mo'
+selected_interval = st.selectbox("Select an interval for stock data", intervals, index=0, key='interval_stock')  # Default to '1d'
+
+# Function to import stock data
+def import_stock_data(symbols, period, interval):
+    engine = create_engine(database_url)
+    for symbol in symbols:
+        # Fetch historical data based on user selection
+        ticker = yf.Ticker(symbol)
+        try:
+            hist = ticker.history(period=period, interval=interval)
+        except Exception as e:
+            st.error(f"Error fetching data for {symbol}: {e}")
+            continue
+        # Check if data is empty
+        if hist.empty:
+            st.error(f"No data found for {symbol} with the selected parameters.")
+            continue
+        # Reset index to turn date index into a column
+        hist.reset_index(inplace=True)
+        # Prepare the data for insertion
+        hist['symbol'] = symbol
+        hist['period'] = period
+        hist['interval'] = interval
+        # Ensure the 'Date' or 'Datetime' column exists
+        date_column = 'Date' if 'Date' in hist.columns else 'Datetime'
+        hist = hist[['symbol', date_column, 'period', 'interval', 'Open', 'High', 'Low', 'Close', 'Volume']]
+        hist.rename(columns={
+            date_column: 'date',
+            'Open': 'open',
+            'High': 'high',
+            'Low': 'low',
+            'Close': 'close',
+            'Volume': 'volume'
+        }, inplace=True)
+        hist['date'] = pd.to_datetime(hist['date']).dt.tz_localize(None)  # Remove timezone
+        # Insert data into the database
+        try:
+            hist.to_sql('historical_stock_data', engine, if_exists='append', index=False, method='multi')
+            st.success(f"{symbol} stock data imported successfully.")
+        except Exception as e:
+            st.error(f"Failed to insert data for {symbol} into the database: {e}")
+
+# Add a button to import selected stock data
+if st.button("Import Selected Stock Data"):
+    symbols = [selected_ticker1, selected_ticker2]
+    try:
+        import_stock_data(symbols, selected_period, selected_interval)
+    except Exception as e:
+        st.error(f"Failed to import stock data: {e}")
+
+# Fetch and display selected stock data from the database
+try:
+    engine = create_engine(database_url)
+    query = """
+    SELECT * FROM historical_stock_data
+    WHERE symbol IN (%s, %s) AND period = %s AND interval = %s
+    ORDER BY date ASC
+    """
+    params = (selected_ticker1, selected_ticker2, selected_period, selected_interval)
+    df_stock_data = pd.read_sql_query(query, engine, params=params)
+    if df_stock_data.empty:
+        st.warning("No data found for the selected tickers. Please import data first.")
+    else:
+        st.write("### Stock Data Stored in the Database")
+        st.dataframe(df_stock_data)
+        # Prepare data for plotting
+        df_stock_data['date'] = pd.to_datetime(df_stock_data['date']).dt.tz_localize(None)
+        df_stock_data.set_index('date', inplace=True)
+        # Pivot the data
+        df_pivot = df_stock_data.pivot_table(values='close', index='date', columns='symbol')
+        # Plot the data
+        st.write("### Stock Closing Price Chart")
+        st.line_chart(df_pivot)
+except Exception as e:
+    st.error(f"Failed to fetch stock data from the database: {e}")

@@ -1,5 +1,8 @@
 streamlit
 pandas
-openai
+sqlalchemy
+yfinance
+psycopg2-binary
+seaborn
+matplotlib
 python-dotenv
-requests
