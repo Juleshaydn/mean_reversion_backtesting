@@ -1,8 +1,9 @@
-streamlit
+streamlit>=1.18.0
 pandas
 sqlalchemy
 yfinance
 psycopg2-binary
 seaborn
 matplotlib
+openai
 python-dotenv
