@@ -5,5 +5,5 @@ yfinance
 psycopg2-binary
 seaborn
 matplotlib
-openai
+openai==0.28.0
 python-dotenv

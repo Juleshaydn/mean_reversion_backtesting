@@ -71,9 +71,14 @@ with left_col:
     
     # Handle user input and AI response
     if send_button and user_input.strip() != "":
+        # Append the user input to session state chat history
+        st.session_state.chat_history.append({"role": "user", "content": user_input})
+        
         # Generate AI response using the separate module
         ai_response = get_ai_response(st.session_state.chat_history, user_input)
-        # No need to manually append messages; `get_ai_response` does that
+        
+        # Append the AI response to session state chat history
+        st.session_state.chat_history.append({"role": "assistant", "content": ai_response})
         
         # Scroll to the bottom of the chat container
         st.markdown("""
@@ -86,6 +91,9 @@ with left_col:
             """, unsafe_allow_html=True)
 
 with right_col:
+    # The stock data section remains unchanged
+    ...
+
     # Check if DATABASE_URL is set
     database_url = os.getenv('DATABASE_URL')
     if not database_url:
