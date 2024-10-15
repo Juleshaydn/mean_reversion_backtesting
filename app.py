@@ -26,12 +26,24 @@ left_col, right_col = st.columns([2, 2])
 
 with left_col:
     st.markdown("## AI Chat Interface")
+
+    # Apply custom CSS to ensure text wrapping
+    st.markdown("""
+    <style>
+        .wrap-text {
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
     # Display chat history
     chat_container = st.container()
     with chat_container:
         for message in st.session_state.chat_history:
             role, content = message['role'], message['content']
-            st.text(f"{role}: {content}")
+            # Use markdown with a custom class for wrapping
+            st.markdown(f"<div class='wrap-text'><b>{role}:</b> {content}</div>", unsafe_allow_html=True)
 
     user_input = st.text_input("Type your message:", key="user_input")
     send_button = st.button("Send")
@@ -54,7 +66,8 @@ with left_col:
         with chat_container:
             for message in st.session_state.chat_history:
                 role, content = message['role'], message['content']
-                st.text(f"{role}: {content}")
+                # Ensure text wraps properly in the display
+                st.markdown(f"<div class='wrap-text'><b>{role}:</b> {content}</div>", unsafe_allow_html=True)
 
 # The rest of your right_col and stock data handling remains unchanged
 
