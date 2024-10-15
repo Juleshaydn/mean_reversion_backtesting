@@ -27,23 +27,37 @@ left_col, right_col = st.columns([2, 2])
 with left_col:
     st.markdown("## AI Chat Interface")
 
-    # Apply custom CSS to ensure text wrapping
+    # Apply custom CSS for text wrapping, fixed height with internal scrolling, and message styling
     st.markdown("""
     <style>
         .wrap-text {
             word-wrap: break-word;
             white-space: pre-wrap;
+            background-color: rgba(245, 245, 245, 0.1);  /* Light grey background with opacity */
+            border: 1px solid #ccc;  /* Grey border */
+            border-radius: 8px;  /* Rounded corners */
+            padding: 8px;  /* Padding inside the message box */
+            margin-bottom: 10px;  /* Margin between messages */
+            margin-left: 5px;
+            margin-right: 5px;
+        }
+        .fixed-height-container {
+            height: 90vh; /* Adjust based on your header/footer height */
+            overflow-y: auto;
+            padding: 5px;  /* Padding inside the container */
         }
     </style>
     """, unsafe_allow_html=True)
 
-    # Display chat history
+    # Use a container with fixed height and scrolling for the chat history
+    st.markdown("<div class='fixed-height-container'>", unsafe_allow_html=True)
     chat_container = st.container()
     with chat_container:
         for message in st.session_state.chat_history:
             role, content = message['role'], message['content']
-            # Use markdown with a custom class for wrapping
+            # Use markdown with a custom class for wrapping and styling
             st.markdown(f"<div class='wrap-text'><b>{role}:</b> {content}</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     user_input = st.text_input("Type your message:", key="user_input")
     send_button = st.button("Send")
@@ -63,11 +77,13 @@ with left_col:
         
         # Refresh chat display
         chat_container.empty()
+        st.markdown("<div class='fixed-height-container'>", unsafe_allow_html=True)
         with chat_container:
             for message in st.session_state.chat_history:
                 role, content = message['role'], message['content']
-                # Ensure text wraps properly in the display
+                # Reapply custom class for wrapping and enhanced styling
                 st.markdown(f"<div class='wrap-text'><b>{role}:</b> {content}</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # The rest of your right_col and stock data handling remains unchanged
 
