@@ -5,10 +5,10 @@ import pandas as pd
 import os
 from sqlalchemy import create_engine
 import yfinance as yf
-from db import create_tables  # Assuming create_tables is in db.py
+from db import create_tables
 import seaborn as sns
 import matplotlib.pyplot as plt
-from openai_chat import get_ai_response  # Import the AI response function
+from openai_chat import get_ai_response
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -24,71 +24,35 @@ if 'chat_history' not in st.session_state:
 # Create two columns: Left for AI Chat, Right for Stock Analysis
 left_col, right_col = st.columns([2, 2])
 
+# app.py (Chat Handling Part)
+
 with left_col:
     st.markdown("## AI Chat Interface")
+    user_input = st.text_input("Type your message:", key="user_input")
+    send_button = st.button("Send")
     
-    # Container for chat history with scrollable area
-    chat_container = st.container()
-    
-    # Define CSS for chat area and fixed input
-    st.markdown("""
-        <style>
-        .chat-container {
-            height: 70vh;
-            overflow-y: auto;
-            border: 1px solid #ddd;
-            padding: 10px;
-            border-radius: 5px;
-            background-color: #f9f9f9;
-        }
-        .fixed-input {
-            position: fixed;
-            bottom: 10px;
-            width: 25%;
-            background-color: black;
-            padding: 10px;
-            border-top: 1px solid #ddd;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-    
-    # Display chat history within a styled div
-    with chat_container:
-        st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
-        for message in st.session_state.chat_history:
-            if message['role'] == 'user':
-                st.markdown(f"**You:** {message['content']}")
-            elif message['role'] == 'assistant':
-                st.markdown(f"**AI:** {message['content']}")
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    # Fixed prompt input at the bottom
-    st.markdown("<div class='fixed-input'>", unsafe_allow_html=True)
-    with st.form(key='chat_form', clear_on_submit=True):
-        user_input = st.text_input("Type your message:")
-        send_button = st.form_submit_button("Send")
-    st.markdown("</div>", unsafe_allow_html=True)
-    
-    # Handle user input and AI response
     if send_button and user_input.strip() != "":
-        # Append the user input to session state chat history
-        st.session_state.chat_history.append({"role": "user", "content": user_input})
+        # Temporarily hold chat history to avoid multiple updates
+        temp_chat_history = st.session_state.chat_history.copy()
         
-        # Generate AI response using the separate module
-        ai_response = get_ai_response(st.session_state.chat_history, user_input)
+        # Append user message
+        temp_chat_history.append({"role": "user", "content": user_input})
         
-        # Append the AI response to session state chat history
-        st.session_state.chat_history.append({"role": "assistant", "content": ai_response})
+        # Get AI response
+        ai_response = get_ai_response(temp_chat_history, user_input)
         
-        # Scroll to the bottom of the chat container
-        st.markdown("""
-            <script>
-            var chat_container = window.parent.document.querySelector('.chat-container');
-            if(chat_container){
-                chat_container.scrollTop = chat_container.scrollHeight;
-            }
-            </script>
-            """, unsafe_allow_html=True)
+        # Append AI response
+        temp_chat_history.append({"role": "assistant", "content": ai_response})
+        
+        # Update the session state chat history once
+        st.session_state.chat_history = temp_chat_history
+        
+    # Display chat history
+    chat_container = st.container()
+    with chat_container:
+        for message in st.session_state.chat_history:
+            role, content = message['role'], message['content']
+            st.text(f"{role}: {content}")
 
 with right_col:
     # The stock data section remains unchanged

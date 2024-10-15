@@ -16,7 +16,7 @@ openai.api_key = openai_api_key
 def get_ai_response(chat_history, user_message, model="gpt-3.5-turbo"):
     """
     Sends the chat history and the latest user message to OpenAI API
-    and returns the AI's response using the new 1.0.0+ API.
+    and returns only the AI's response, without modifying the chat history.
 
     Parameters:
     - chat_history (list): List of dictionaries containing previous messages.
@@ -26,18 +26,12 @@ def get_ai_response(chat_history, user_message, model="gpt-3.5-turbo"):
     Returns:
     - str: AI's response message.
     """
-    # Append the latest user message to the chat history
-    chat_history.append({"role": "user", "content": user_message})
-
     try:
-        # Use the new API for chat completion
         response = openai.ChatCompletion.create(
             model=model,
-            messages=chat_history
+            messages=chat_history + [{"role": "user", "content": user_message}]
         )
         ai_message = response['choices'][0]['message']['content'].strip()
-        # Append AI's response to the chat history
-        chat_history.append({"role": "assistant", "content": ai_message})
         return ai_message
     except Exception as e:
         return f"Error: {e}"
