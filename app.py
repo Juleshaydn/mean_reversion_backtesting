@@ -24,35 +24,39 @@ if 'chat_history' not in st.session_state:
 # Create two columns: Left for AI Chat, Right for Stock Analysis
 left_col, right_col = st.columns([2, 2])
 
-# app.py (Chat Handling Part)
-
 with left_col:
     st.markdown("## AI Chat Interface")
-    user_input = st.text_input("Type your message:", key="user_input")
-    send_button = st.button("Send")
-    
-    if send_button and user_input.strip() != "":
-        # Temporarily hold chat history to avoid multiple updates
-        temp_chat_history = st.session_state.chat_history.copy()
-        
-        # Append user message
-        temp_chat_history.append({"role": "user", "content": user_input})
-        
-        # Get AI response
-        ai_response = get_ai_response(temp_chat_history, user_input)
-        
-        # Append AI response
-        temp_chat_history.append({"role": "assistant", "content": ai_response})
-        
-        # Update the session state chat history once
-        st.session_state.chat_history = temp_chat_history
-        
     # Display chat history
     chat_container = st.container()
     with chat_container:
         for message in st.session_state.chat_history:
             role, content = message['role'], message['content']
             st.text(f"{role}: {content}")
+
+    user_input = st.text_input("Type your message:", key="user_input")
+    send_button = st.button("Send")
+
+    if send_button and user_input.strip() != "":
+        # Temporarily hold chat history to avoid multiple updates
+        temp_chat_history = st.session_state.chat_history.copy()
+        temp_chat_history.append({"role": "user", "content": user_input})
+
+        # Display loading message
+        with st.spinner('Waiting for AI response...'):
+            ai_response = get_ai_response(temp_chat_history, user_input)
+            temp_chat_history.append({"role": "assistant", "content": ai_response})
+
+        # Update the session state chat history once
+        st.session_state.chat_history = temp_chat_history
+        
+        # Refresh chat display
+        chat_container.empty()
+        with chat_container:
+            for message in st.session_state.chat_history:
+                role, content = message['role'], message['content']
+                st.text(f"{role}: {content}")
+
+# The rest of your right_col and stock data handling remains unchanged
 
 with right_col:
     # The stock data section remains unchanged
