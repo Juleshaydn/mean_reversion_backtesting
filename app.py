@@ -382,6 +382,11 @@ with right_col:
             ax_signal.legend()
             st.pyplot(fig_signal)
 
+        if p_value < 0.05:
+            st.success("The series are cointegrated.")
+        else:
+            st.warning("The series are not cointegrated.")
+            
         # Display the cointegration test results
         st.write("### Cointegration Test Results")
         st.write(f"t-statistic: {coint_t:.4f}")
@@ -391,28 +396,26 @@ with right_col:
         st.write(f"5%: {critical_values[1]:.4f}")
         st.write(f"10%: {critical_values[2]:.4f}")
 
-        if p_value < 0.05:
-            st.success("The series are cointegrated.")
-        else:
-            st.warning("The series are not cointegrated.")
 
-        # Display the data stored in the database at the bottom of the page
-        st.write("## Data Stored in the Database")
+        with st.expander("Data Stored in the Database"):
+            # Fetch data from the database
+            try:
+                conn = get_db_connection()
+                query = """
+                    SELECT date, ticker1, ticker2, signal_type, spread, profit
+                    FROM signals
+                    ORDER BY date DESC;
+                """
+                df_signals_db = pd.read_sql(query, conn)
+                conn.close()
 
-        # Fetch data from the database
-        try:
-            conn = get_db_connection()
-            query = """
-                SELECT date, ticker1, ticker2, signal_type, spread, profit
-                FROM signals
-                ORDER BY date DESC;
-            """
-            df_signals_db = pd.read_sql(query, conn)
-            conn.close()
+                # Display the data
+                st.dataframe(df_signals_db)
+            except Exception as e:
+                st.error(f"Failed to fetch data from the database: {e}")
 
-            # Display the data
-            st.dataframe(df_signals_db)
-        except Exception as e:
-            st.error(f"Failed to fetch data from the database: {e}")
+
+
+
     else:
         st.info("Run analysis to display charts and results.")
