@@ -141,8 +141,6 @@ with right_col:
     # List of tickers for the dropdown
     tickers = ['AAPL', 'AMZN', 'GOOG', 'MSFT', 'TSLA', 'BRK-B']
 
-    # Select tickers, period, and interval (aligned horizontally)
-    st.subheader("Select Parameters for Analysis")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         selected_ticker1 = st.selectbox(
@@ -271,8 +269,30 @@ with right_col:
         cursor.close()
         conn.close()
 
-    # Add a button to import and analyze data
-    if st.button("Run Analysis", key='run_analysis_button'):
+    # Function to calculate expected return based on trading value
+    def calculate_expected_return(signals_df, trading_value):
+        # Calculate the return for each trade based on the trading value and profit/loss from each trade
+        signals_df['trade_return'] = signals_df['profit'] * trading_value
+        total_return = signals_df['trade_return'].sum()
+        return total_return
+    
+    # Arrange inputs and button horizontally in columns
+    col_bollinger, col_moving_avg, col_trading_val, col_button = st.columns(4)
+
+    with col_bollinger:
+        bollinger_multiplier = st.number_input("Bollinger Band Multiplier", min_value=0.5, max_value=5.0, value=1.0, step=0.1, key="bollinger_multiplier")
+
+    with col_moving_avg:
+        moving_average_window = st.number_input("Moving Average Window", min_value=5, max_value=100, value=20, step=1, key="moving_average_window")
+
+    with col_trading_val:
+        trading_value = st.number_input("Trading Value per Trade (£)", min_value=100.0, value=1000.0, step=50.0, key="trading_value")
+
+    with col_button:
+        run_analysis = st.button("Run Analysis", key='run_analysis_button')
+
+    # Add the logic to run analysis only if the button is clicked
+    if run_analysis:
         symbols = [selected_ticker1, selected_ticker2]
         # Validate period and interval combination
         invalid_combination, error_message = validate_period_interval(selected_period, selected_interval)
@@ -285,137 +305,130 @@ with right_col:
                 if df_stock_data.empty:
                     st.warning("No data found for the selected tickers. Please try different parameters.")
                 else:
-                    # Store data in session state
-                    st.session_state.analysis_data = df_stock_data
-                    st.session_state.analysis_run = True
+                    # Prepare data for analysis
+                    df_stock_data.set_index('date', inplace=True)
+                    df_pivot = df_stock_data.pivot_table(values='close', index='date', columns='symbol')
+                    df_pivot = df_pivot.dropna(subset=[selected_ticker1, selected_ticker2])
+
+                    # Calculate the spread
+                    df_pivot['spread'] = df_pivot[selected_ticker1] - df_pivot[selected_ticker2]
+
+                    # Calculate the Moving Average and standard deviation for Bollinger Bands
+                    df_pivot['moving_avg'] = df_pivot['spread'].rolling(window=int(moving_average_window)).mean()
+                    df_pivot['std_dev'] = df_pivot['spread'].rolling(window=int(moving_average_window)).std()
+                    
+                    # Calculate Bollinger Bands using user-defined multiplier
+                    df_pivot['upper_band'] = df_pivot['moving_avg'] + (df_pivot['std_dev'] * bollinger_multiplier)
+                    df_pivot['lower_band'] = df_pivot['moving_avg'] - (df_pivot['std_dev'] * bollinger_multiplier)
+
+                    # Calculate Z-score of the spread based on the Moving Average and standard deviation
+                    df_pivot['z_score'] = (df_pivot['spread'] - df_pivot['moving_avg']) / df_pivot['std_dev']
+
+                    # Perform cointegration test
+                    coint_t, p_value, critical_values = coint(df_pivot[selected_ticker1], df_pivot[selected_ticker2])
+
+                    # Generate buy and sell signals based on Bollinger Bands
+                    df_pivot['buy_signal'] = np.where(df_pivot['spread'] < df_pivot['lower_band'], df_pivot['spread'], np.nan)
+                    df_pivot['sell_signal'] = np.where(df_pivot['spread'] > df_pivot['upper_band'], df_pivot['spread'], np.nan)
+
+                    # Add symbol columns
+                    df_pivot['symbol1'] = selected_ticker1
+                    df_pivot['symbol2'] = selected_ticker2
+
+                    # Clear existing data and insert signals into the database
+                    clear_signals_table()  # Clear the signals table before inserting new data
+                    df_pivot.reset_index(inplace=True)
+                    
+                    # Prepare signals DataFrame
+                    buy_signals = df_pivot[df_pivot['buy_signal'].notnull()].copy()
+                    buy_signals['signal_type'] = 'buy'
+                    buy_signals['signal_value'] = buy_signals['buy_signal']
+
+                    sell_signals = df_pivot[df_pivot['sell_signal'].notnull()].copy()
+                    sell_signals['signal_type'] = 'sell'
+                    sell_signals['signal_value'] = sell_signals['sell_signal']
+
+                    signals_df = pd.concat([buy_signals, sell_signals]).sort_values('date')
+                    signals_df = signals_df[['date', 'symbol1', 'symbol2', 'spread', 'signal_type', 'signal_value']]
+                    signals_df.reset_index(drop=True, inplace=True)
+
+                    # Calculate profits
+                    signals_df = calculate_profits(signals_df)
+                    insert_signals_to_db(signals_df)
+
+                    # Calculate expected return based on trading value
+                    expected_return = calculate_expected_return(signals_df, trading_value)
+
+                    # Save to session for displaying charts and results
+                    st.session_state.df_pivot = df_pivot.copy()
+                    st.session_state.coint_results = (coint_t, p_value, critical_values)
+
+                    st.success(f"Signals and profits have been saved to the database. Expected Return: £{expected_return:.2f}")
             except Exception as e:
                 st.error(f"Failed to fetch and analyze stock data: {e}")
 
-    # Perform analysis if data is available
-    if st.session_state.analysis_run and st.session_state.analysis_data is not None:
-        df_stock_data = st.session_state.analysis_data.copy()
-        # Prepare data for analysis
-        df_stock_data.set_index('date', inplace=True)
-        # Pivot the data
-        df_pivot = df_stock_data.pivot_table(values='close', index='date', columns='symbol')
-        # Ensure data is aligned and drop NaN values
-        df_pivot = df_pivot.dropna(subset=[selected_ticker1, selected_ticker2])
+        # Display Charts and Results
+        if st.session_state.get('df_pivot') is not None:
+            df_pivot = st.session_state.df_pivot.copy()
+            coint_t, p_value, critical_values = st.session_state.coint_results
 
-        # Ensure the selected symbols are in the data
-        if selected_ticker1 in df_pivot.columns and selected_ticker2 in df_pivot.columns:
-            # Calculate the spread
-            df_pivot['spread'] = df_pivot[selected_ticker1] - df_pivot[selected_ticker2]
+            # Create two columns for side-by-side plots
+            col_plot1, col_plot2 = st.columns(2)
 
-            # Calculate Z-score of the spread
-            df_pivot['z_score'] = (df_pivot['spread'] - df_pivot['spread'].mean()) / df_pivot['spread'].std()
+            with col_plot1:
+                st.write("### Z-score of the Spread")
+                fig_zscore, ax_zscore = plt.subplots(figsize=(10, 6))
+                ax_zscore.plot(df_pivot.index, df_pivot['z_score'], label='Z-score')
+                ax_zscore.axhline(0, color='black', linestyle='--')
+                ax_zscore.axhline(1, color='red', linestyle='--')
+                ax_zscore.axhline(-1, color='green', linestyle='--')
+                ax_zscore.set_xlabel('Date')
+                ax_zscore.set_ylabel('Z-score')
+                ax_zscore.set_title('Z-score of the Spread')
+                ax_zscore.legend()
+                st.pyplot(fig_zscore)
 
-            # Perform cointegration test
-            coint_t, p_value, critical_values = coint(df_pivot[selected_ticker1], df_pivot[selected_ticker2])
+            with col_plot2:
+                st.write("### Spread with Buy and Sell Signals")
+                fig_signal, ax_signal = plt.subplots(figsize=(10, 6))
+                ax_signal.plot(df_pivot.index, df_pivot['spread'], label='Spread')
+                ax_signal.plot(df_pivot.index, df_pivot['buy_signal'], '^', markersize=10, color='green', label='Buy Signal')
+                ax_signal.plot(df_pivot.index, df_pivot['sell_signal'], 'v', markersize=10, color='red', label='Sell Signal')
+                ax_signal.set_xlabel('Date')
+                ax_signal.set_ylabel('Price Difference')
+                ax_signal.set_title(f"Spread between {selected_ticker1} and {selected_ticker2} with Signals")
+                ax_signal.legend()
+                st.pyplot(fig_signal)
 
-            # Generate buy and sell signals
-            df_pivot['buy_signal'] = np.where(df_pivot['z_score'] <= -1, df_pivot['spread'], np.nan)
-            df_pivot['sell_signal'] = np.where(df_pivot['z_score'] >= 1, df_pivot['spread'], np.nan)
+            if p_value < 0.05:
+                st.success("The series are cointegrated.")
+            else:
+                st.warning("The series are not cointegrated.")
+                
+            # Display the cointegration test results
+            st.write("### Cointegration Test Results")
+            st.write(f"t-statistic: {coint_t:.4f}")
+            st.write(f"p-value: {p_value:.4f}")
+            st.write("Critical Values:")
+            st.write(f"1%: {critical_values[0]:.4f}")
+            st.write(f"5%: {critical_values[1]:.4f}")
+            st.write(f"10%: {critical_values[2]:.4f}")
 
-            # Add symbol columns
-            df_pivot['symbol1'] = selected_ticker1
-            df_pivot['symbol2'] = selected_ticker2
+            with st.expander("Data Stored in the Database"):
+                # Fetch data from the database
+                try:
+                    conn = get_db_connection()
+                    query = """
+                        SELECT date, ticker1, ticker2, signal_type, spread, profit
+                        FROM signals
+                        ORDER BY date DESC;
+                    """
+                    df_signals_db = pd.read_sql(query, conn)
+                    conn.close()
 
-            # Store df_pivot and cointegration results in session state
-            st.session_state.df_pivot = df_pivot.copy()
-            st.session_state.coint_results = (coint_t, p_value, critical_values)
-
-            # Clear existing data and insert signals into the database
-            clear_signals_table()  # Clear the signals table before inserting new data
-            df_pivot.reset_index(inplace=True)
-            # Prepare signals DataFrame
-            buy_signals = df_pivot[df_pivot['buy_signal'].notnull()].copy()
-            buy_signals['signal_type'] = 'buy'
-            buy_signals['signal_value'] = buy_signals['buy_signal']
-
-            sell_signals = df_pivot[df_pivot['sell_signal'].notnull()].copy()
-            sell_signals['signal_type'] = 'sell'
-            sell_signals['signal_value'] = sell_signals['sell_signal']
-
-            signals_df = pd.concat([buy_signals, sell_signals]).sort_values('date')
-            signals_df = signals_df[['date', 'symbol1', 'symbol2', 'spread', 'signal_type', 'signal_value']]
-            signals_df.reset_index(drop=True, inplace=True)
-
-            # Calculate profits
-            signals_df = calculate_profits(signals_df)
-
-            insert_signals_to_db(signals_df)
-
-            st.success("Signals and profits have been saved to the database.")
+                    # Display the data
+                    st.dataframe(df_signals_db)
+                except Exception as e:
+                    st.error(f"Failed to fetch data from the database: {e}")
         else:
-            st.error("Selected tickers are not in the data.")
-
-    # Display Charts and Results
-    if st.session_state.get('df_pivot') is not None:
-        df_pivot = st.session_state.df_pivot.copy()
-        coint_t, p_value, critical_values = st.session_state.coint_results
-
-        # Create two columns for side-by-side plots
-        col_plot1, col_plot2 = st.columns(2)
-
-        with col_plot1:
-            st.write("### Z-score of the Spread")
-            fig_zscore, ax_zscore = plt.subplots(figsize=(10, 6))
-            ax_zscore.plot(df_pivot.index, df_pivot['z_score'], label='Z-score')
-            ax_zscore.axhline(0, color='black', linestyle='--')
-            ax_zscore.axhline(1, color='red', linestyle='--')
-            ax_zscore.axhline(-1, color='green', linestyle='--')
-            ax_zscore.set_xlabel('Date')
-            ax_zscore.set_ylabel('Z-score')
-            ax_zscore.set_title('Z-score of the Spread')
-            ax_zscore.legend()
-            st.pyplot(fig_zscore)
-
-        with col_plot2:
-            st.write("### Spread with Buy and Sell Signals")
-            fig_signal, ax_signal = plt.subplots(figsize=(10, 6))
-            ax_signal.plot(df_pivot.index, df_pivot['spread'], label='Spread')
-            ax_signal.plot(df_pivot.index, df_pivot['buy_signal'], '^', markersize=10, color='green', label='Buy Signal')
-            ax_signal.plot(df_pivot.index, df_pivot['sell_signal'], 'v', markersize=10, color='red', label='Sell Signal')
-            ax_signal.set_xlabel('Date')
-            ax_signal.set_ylabel('Price Difference')
-            ax_signal.set_title(f"Spread between {selected_ticker1} and {selected_ticker2} with Signals")
-            ax_signal.legend()
-            st.pyplot(fig_signal)
-
-        if p_value < 0.05:
-            st.success("The series are cointegrated.")
-        else:
-            st.warning("The series are not cointegrated.")
-            
-        # Display the cointegration test results
-        st.write("### Cointegration Test Results")
-        st.write(f"t-statistic: {coint_t:.4f}")
-        st.write(f"p-value: {p_value:.4f}")
-        st.write("Critical Values:")
-        st.write(f"1%: {critical_values[0]:.4f}")
-        st.write(f"5%: {critical_values[1]:.4f}")
-        st.write(f"10%: {critical_values[2]:.4f}")
-
-
-        with st.expander("Data Stored in the Database"):
-            # Fetch data from the database
-            try:
-                conn = get_db_connection()
-                query = """
-                    SELECT date, ticker1, ticker2, signal_type, spread, profit
-                    FROM signals
-                    ORDER BY date DESC;
-                """
-                df_signals_db = pd.read_sql(query, conn)
-                conn.close()
-
-                # Display the data
-                st.dataframe(df_signals_db)
-            except Exception as e:
-                st.error(f"Failed to fetch data from the database: {e}")
-
-
-
-
-    else:
-        st.info("Run analysis to display charts and results.")
+            st.info("Run analysis to display charts and results.")
