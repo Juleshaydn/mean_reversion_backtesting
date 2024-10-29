@@ -412,31 +412,33 @@ with right_col:
             # st.write(f"5%: {critical_values[1]:.4f}")
             # st.write(f"10%: {critical_values[2]:.4f}")
 
-            # OpenAI Response
-            st.write("AI Analysis")
+            st.write("### AI Analysis")
 
-            # Define a prompt template with context for OpenAI
-            prompt_template = f"""
-            Analyze the following strategy parameters based on the user's inputs and calculations:
-            - Selected tickers: {selected_ticker1} and {selected_ticker2}
-            - Period: {selected_period}, Interval: {selected_interval}
-            - Bollinger Band Multiplier: {bollinger_multiplier}
-            - Moving Average Window: {moving_average_window}
-            - Trading Value per Trade: £{trading_value}
-            - Cointegration Test Results:
-            - t-statistic: {coint_t:.4f}
-            - p-value: {p_value:.4f}
-            - Critical Values: 1%: {critical_values[0]:.4f}, 5%: {critical_values[1]:.4f}, 10%: {critical_values[2]:.4f}
-            - Expected Return: £{expected_return:.2f}
+            # Show a loading indicator while waiting for AI response
+            with st.spinner('Analyzing strategy parameters...'):
+                # Define a prompt template with context for OpenAI
+                prompt_template = f"""
+                Analyze the following strategy parameters based on the user's inputs and calculations:
+                - Selected tickers: {selected_ticker1} and {selected_ticker2}
+                - Period: {selected_period}, Interval: {selected_interval}
+                - Bollinger Band Multiplier: {bollinger_multiplier}
+                - Moving Average Window: {moving_average_window}
+                - Trading Value per Trade: £{trading_value}
+                - Cointegration Test Results:
+                - t-statistic: {coint_t:.4f}
+                - p-value: {p_value:.4f}
+                - Critical Values: 1%: {critical_values[0]:.4f}, 5%: {critical_values[1]:.4f}, 10%: {critical_values[2]:.4f}
+                - Expected Return: £{expected_return:.2f}
 
-            Please provide a simple analysis of this trading strategy's viability, strengths, and potential risks, make sure to include the expected return from this strategy first.
-            """
+                Please provide a simple analysis of this trading strategy's viability, strengths, and potential risks, making sure to include the expected return from this strategy first.
+                """
 
-            # Get AI response
-            ai_response = get_ai_response(st.session_state.chat_history, prompt_template)
+                # Get AI response
+                ai_response = get_ai_response(st.session_state.chat_history, prompt_template)
 
             # Display AI response
             st.write(ai_response)
+
 
             with st.expander("Data Stored in the Database"):
                 # Fetch data from the database
