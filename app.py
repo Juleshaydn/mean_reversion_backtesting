@@ -131,7 +131,6 @@ with right_col:
     # Initialize database tables and show connection status
     try:
         create_tables()
-        st.success("Connected to the database successfully.")
     except Exception as e:
         st.error(f"Failed to connect to the database: {e}")
 
@@ -362,8 +361,6 @@ with right_col:
                     # Save to session for displaying charts and results
                     st.session_state.df_pivot = df_pivot.copy()
                     st.session_state.coint_results = (coint_t, p_value, critical_values)
-
-                    st.success(f"Signals and profits have been saved to the database. Expected Return: £{expected_return:.2f}")
             except Exception as e:
                 st.error(f"Failed to fetch and analyze stock data: {e}")
 
@@ -406,13 +403,40 @@ with right_col:
                 st.warning("The series are not cointegrated.")
                 
             # Display the cointegration test results
-            st.write("### Cointegration Test Results")
-            st.write(f"t-statistic: {coint_t:.4f}")
-            st.write(f"p-value: {p_value:.4f}")
-            st.write("Critical Values:")
-            st.write(f"1%: {critical_values[0]:.4f}")
-            st.write(f"5%: {critical_values[1]:.4f}")
-            st.write(f"10%: {critical_values[2]:.4f}")
+            # st.write("### Cointegration Test Results")
+            # st.write(f"Expected Return: £{expected_return:.2f}")
+            # st.write(f"t-statistic: {coint_t:.4f}")
+            # st.write(f"p-value: {p_value:.4f}")
+            # st.write("Critical Values:")
+            # st.write(f"1%: {critical_values[0]:.4f}")
+            # st.write(f"5%: {critical_values[1]:.4f}")
+            # st.write(f"10%: {critical_values[2]:.4f}")
+
+            # OpenAI Response
+            st.write("AI Analysis")
+
+            # Define a prompt template with context for OpenAI
+            prompt_template = f"""
+            Analyze the following strategy parameters based on the user's inputs and calculations:
+            - Selected tickers: {selected_ticker1} and {selected_ticker2}
+            - Period: {selected_period}, Interval: {selected_interval}
+            - Bollinger Band Multiplier: {bollinger_multiplier}
+            - Moving Average Window: {moving_average_window}
+            - Trading Value per Trade: £{trading_value}
+            - Cointegration Test Results:
+            - t-statistic: {coint_t:.4f}
+            - p-value: {p_value:.4f}
+            - Critical Values: 1%: {critical_values[0]:.4f}, 5%: {critical_values[1]:.4f}, 10%: {critical_values[2]:.4f}
+            - Expected Return: £{expected_return:.2f}
+
+            Please provide a simple analysis of this trading strategy's viability, strengths, and potential risks, make sure to include the expected return from this strategy first.
+            """
+
+            # Get AI response
+            ai_response = get_ai_response(st.session_state.chat_history, prompt_template)
+
+            # Display AI response
+            st.write(ai_response)
 
             with st.expander("Data Stored in the Database"):
                 # Fetch data from the database
