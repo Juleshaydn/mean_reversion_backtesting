@@ -6,10 +6,11 @@ import os
 from sqlalchemy import create_engine
 import yfinance as yf
 from db import create_tables
-import seaborn as sns
 import matplotlib.pyplot as plt
 from openai_chat import get_ai_response
 from dotenv import load_dotenv
+import numpy as np
+from statsmodels.tsa.stattools import coint, adfuller
 
 # Load environment variables from .env file
 load_dotenv()
@@ -74,7 +75,7 @@ with left_col:
 
         # Update the session state chat history once
         st.session_state.chat_history = temp_chat_history
-        
+
         # Refresh chat display
         chat_container.empty()
         st.markdown("<div class='fixed-height-container'>", unsafe_allow_html=True)
@@ -85,123 +86,70 @@ with left_col:
                 st.markdown(f"<div class='wrap-text'><b>{role}:</b> {content}</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-# The rest of your right_col and stock data handling remains unchanged
-
 with right_col:
-    # The stock data section remains unchanged
-    ...
-
     # Check if DATABASE_URL is set
     database_url = os.getenv('DATABASE_URL')
     if not database_url:
         st.error("DATABASE_URL is not set. Please check your environment variables.")
         st.stop()
-    
+
     # Initialize database tables and show connection status
     try:
         create_tables()
         st.success("Connected to the database successfully.")
     except Exception as e:
         st.error(f"Failed to connect to the database: {e}")
-    
+
     # App Title
-    st.title("Stock Data App")
-    
+    st.title("Stock Mean-Reversion Analysis")
+
     # List of tickers for the dropdown
-    tickers = ['AAPL', 'AMZN', 'GOOG', 'MSFT', 'TSLA']
-    
-    # Select period and interval for correlation matrix
-    st.header("Correlation Matrix of Selected Stocks")
-    periods = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max']
-    intervals = ['1d', '1wk', '1mo']
-    
-    selected_period_corr = st.selectbox("Select a period for correlation", periods, index=2)  # Default to '1mo'
-    selected_interval_corr = st.selectbox("Select an interval for correlation", intervals, index=0)  # Default to '1d'
-    
-    # Button to fetch and display correlation matrix
-    if st.button("Display Correlation Matrix"):
-        # Function to fetch data for correlation matrix
-        def fetch_data_for_correlation(tickers, period, interval):
-            engine = create_engine(database_url)
-            all_data = pd.DataFrame()
-            for symbol in tickers:
-                # Check if data exists in the database
-                query = """
-                SELECT * FROM historical_stock_data
-                WHERE symbol = %s AND period = %s AND interval = %s
-                ORDER BY date ASC
-                """
-                params = (symbol, period, interval)
-                df = pd.read_sql_query(query, engine, params=params)
-    
-                if df.empty:
-                    # Fetch data from yfinance and insert into the database
-                    ticker = yf.Ticker(symbol)
-                    hist = ticker.history(period=period, interval=interval)
-                    if hist.empty:
-                        st.error(f"No data found for {symbol} with the selected parameters.")
-                        continue
-                    hist.reset_index(inplace=True)
-                    hist['symbol'] = symbol
-                    hist['period'] = period
-                    hist['interval'] = interval
-                    date_column = 'Date' if 'Date' in hist.columns else 'Datetime'
-                    hist.rename(columns={date_column: 'date', 'Close': 'close'}, inplace=True)
-                    hist['date'] = pd.to_datetime(hist['date']).dt.tz_localize(None)  # Remove timezone
-                    hist = hist[['symbol', 'date', 'period', 'interval', 'close']]
-                    # Insert data into the database
-                    try:
-                        hist.to_sql('historical_stock_data', engine, if_exists='append', index=False, method='multi')
-                        st.success(f"{symbol} stock data imported successfully for correlation.")
-                        df = hist
-                    except Exception as e:
-                        st.error(f"Failed to insert data for {symbol} into the database: {e}")
-                        continue
-                else:
-                    # Process data fetched from the database
-                    df['date'] = pd.to_datetime(df['date']).dt.tz_localize(None)  # Remove timezone
-    
-                # Prepare df for joining
-                df = df[['date', 'close']].copy()
-                df.set_index('date', inplace=True)
-                df.rename(columns={'close': symbol}, inplace=True)
-                df.index = df.index.tz_localize(None)  # Ensure tz-naive index
-    
-                # Join data
-                if all_data.empty:
-                    all_data = df
-                else:
-                    all_data.index = all_data.index.tz_localize(None)  # Ensure tz-naive index
-                    all_data = all_data.join(df, how='outer')
-            return all_data
-    
-        # Fetch data and compute correlation matrix
-        stock_data = fetch_data_for_correlation(tickers, selected_period_corr, selected_interval_corr)
-        if not stock_data.empty:
-            stock_data = stock_data.dropna()
-            corr_matrix = stock_data.corr()
-            st.write("### Correlation Matrix")
-    
-            # Display the correlation matrix as a heatmap
-            fig, ax = plt.subplots(figsize=(10, 8))
-            sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', ax=ax)
-            st.pyplot(fig)
-        else:
-            st.warning("No data available to display correlation matrix. Please try different parameters.")
-    
-    st.write("---")  # Separator
-    
-    # Select tickers from dropdowns
-    selected_ticker1 = st.selectbox("Select the first stock ticker", tickers, key='ticker1')
-    selected_ticker2 = st.selectbox("Select the second stock ticker", tickers, key='ticker2')
-    
-    # Select period and interval for stock data
-    selected_period = st.selectbox("Select a period for stock data", periods, index=2, key='period_stock')  # Default to '1mo'
-    selected_interval = st.selectbox("Select an interval for stock data", intervals, index=0, key='interval_stock')  # Default to '1d'
-    
+    tickers = ['AAPL', 'AMZN', 'GOOG', 'MSFT', 'TSLA', 'BRK-B']
+
+    # Available periods and intervals in yfinance
+    periods = [
+        '1d', '5d', '7d', '1mo', '3mo', '6mo',
+        '1y', '2y', '5y', '10y', 'ytd', 'max'
+    ]
+
+    intervals = [
+        '1m', '2m', '5m', '15m', '30m', '60m', '90m',
+        '1d', '5d', '1wk', '1mo', '3mo'
+    ]
+
+    # Select tickers, period, and interval (aligned horizontally)
+    st.subheader("Select Parameters for Analysis")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        selected_ticker1 = st.selectbox("First Ticker", tickers, key='ticker1')
+    with col2:
+        selected_ticker2 = st.selectbox("Second Ticker", tickers, key='ticker2')
+    with col3:
+        selected_period = st.selectbox("Period", periods, index=3, key='period_stock')  # Default to '1mo'
+    with col4:
+        selected_interval = st.selectbox("Interval", intervals, index=7, key='interval_stock')  # Default to '1d'
+
+    # Function to validate period and interval combination
+    def validate_period_interval(period, interval):
+        invalid_combination = False
+        error_message = ""
+        if interval == '1m' and period not in ['1d', '5d', '7d']:
+            invalid_combination = True
+            error_message = "1 minute interval is only available for periods up to 7 days."
+        elif interval == '2m' and period not in ['1d', '5d', '7d', '1mo', '3mo']:
+            invalid_combination = True
+            error_message = "2 minute interval is only available for periods up to 60 days."
+        elif interval in ['5m', '15m', '30m', '60m', '90m'] and period not in ['1d', '5d', '7d', '1mo', '3mo', '6mo']:
+            invalid_combination = True
+            error_message = "Intraday intervals are only available for periods up to 60 days."
+        elif interval in ['1d', '5d', '1wk', '1mo', '3mo'] and period == '1d':
+            invalid_combination = True
+            error_message = "Daily and higher intervals are not available for a period of 1 day."
+        return invalid_combination, error_message
+
     # Function to import stock data
     def import_stock_data(symbols, period, interval):
-        engine = create_engine(database_url)
+        all_data = pd.DataFrame()
         for symbol in symbols:
             # Fetch historical data based on user selection
             ticker = yf.Ticker(symbol)
@@ -216,59 +164,97 @@ with right_col:
                 continue
             # Reset index to turn date index into a column
             hist.reset_index(inplace=True)
-            # Prepare the data for insertion
+            # Prepare the data
             hist['symbol'] = symbol
-            hist['period'] = period
-            hist['interval'] = interval
             # Ensure the 'Date' or 'Datetime' column exists
             date_column = 'Date' if 'Date' in hist.columns else 'Datetime'
-            hist = hist[['symbol', date_column, 'period', 'interval', 'Open', 'High', 'Low', 'Close', 'Volume']]
+            hist = hist[['symbol', date_column, 'Close']]
             hist.rename(columns={
                 date_column: 'date',
-                'Open': 'open',
-                'High': 'high',
-                'Low': 'low',
                 'Close': 'close',
-                'Volume': 'volume'
             }, inplace=True)
             hist['date'] = pd.to_datetime(hist['date']).dt.tz_localize(None)  # Remove timezone
-            # Insert data into the database
-            try:
-                hist.to_sql('historical_stock_data', engine, if_exists='append', index=False, method='multi')
-                st.success(f"{symbol} stock data imported successfully.")
-            except Exception as e:
-                st.error(f"Failed to insert data for {symbol} into the database: {e}")
-    
-    # Add a button to import selected stock data
-    if st.button("Import Selected Stock Data"):
+            # Append to all_data
+            all_data = pd.concat([all_data, hist], ignore_index=True)
+        return all_data
+
+    # Add a button to import and analyze data
+    if st.button("Run Analysis"):
         symbols = [selected_ticker1, selected_ticker2]
-        try:
-            import_stock_data(symbols, selected_period, selected_interval)
-        except Exception as e:
-            st.error(f"Failed to import stock data: {e}")
-    
-    # Fetch and display selected stock data from the database
-    try:
-        engine = create_engine(database_url)
-        query = """
-        SELECT * FROM historical_stock_data
-        WHERE symbol IN (%s, %s) AND period = %s AND interval = %s
-        ORDER BY date ASC
-        """
-        params = (selected_ticker1, selected_ticker2, selected_period, selected_interval)
-        df_stock_data = pd.read_sql_query(query, engine, params=params)
-        if df_stock_data.empty:
-            st.warning("No data found for the selected tickers. Please import data first.")
+        # Validate period and interval combination
+        invalid_combination, error_message = validate_period_interval(selected_period, selected_interval)
+        if invalid_combination:
+            st.error(f"Invalid combination of period and interval: {error_message}")
         else:
-            st.write("### Stock Data Stored in the Database")
-            st.dataframe(df_stock_data)
-            # Prepare data for plotting
-            df_stock_data['date'] = pd.to_datetime(df_stock_data['date']).dt.tz_localize(None)
-            df_stock_data.set_index('date', inplace=True)
-            # Pivot the data
-            df_pivot = df_stock_data.pivot_table(values='close', index='date', columns='symbol')
-            # Plot the data
-            st.write("### Stock Closing Price Chart")
-            st.line_chart(df_pivot)
-    except Exception as e:
-        st.error(f"Failed to fetch stock data from the database: {e}")
+            try:
+                df_stock_data = import_stock_data(symbols, selected_period, selected_interval)
+                if df_stock_data.empty:
+                    st.warning("No data found for the selected tickers. Please try different parameters.")
+                else:
+                    # Prepare data for analysis
+                    df_stock_data.set_index('date', inplace=True)
+                    # Pivot the data
+                    df_pivot = df_stock_data.pivot_table(values='close', index='date', columns='symbol')
+                    # Ensure data is aligned and drop NaN values
+                    df_pivot = df_pivot.dropna(subset=[selected_ticker1, selected_ticker2])
+
+                    # Ensure the selected symbols are in the data
+                    if selected_ticker1 in df_pivot.columns and selected_ticker2 in df_pivot.columns:
+                        # Calculate the spread
+                        df_pivot['spread'] = df_pivot[selected_ticker1] - df_pivot[selected_ticker2]
+
+                        # Calculate Z-score of the spread
+                        df_pivot['z_score'] = (df_pivot['spread'] - df_pivot['spread'].mean()) / df_pivot['spread'].std()
+
+                        # Perform cointegration test
+                        coint_t, p_value, critical_values = coint(df_pivot[selected_ticker1], df_pivot[selected_ticker2])
+
+                        # Generate buy and sell signals
+                        df_pivot['buy_signal'] = np.where(df_pivot['z_score'] <= -1, df_pivot['spread'], np.nan)
+                        df_pivot['sell_signal'] = np.where(df_pivot['z_score'] >= 1, df_pivot['spread'], np.nan)
+
+                        # Create two columns for side-by-side plots
+                        col_plot1, col_plot2 = st.columns(2)
+
+                        with col_plot1:
+                            st.write("### Z-score of the Spread")
+                            fig_zscore, ax_zscore = plt.subplots(figsize=(10, 6))
+                            ax_zscore.plot(df_pivot.index, df_pivot['z_score'], label='Z-score')
+                            ax_zscore.axhline(0, color='black', linestyle='--')
+                            ax_zscore.axhline(1, color='red', linestyle='--')
+                            ax_zscore.axhline(-1, color='green', linestyle='--')
+                            ax_zscore.set_xlabel('Date')
+                            ax_zscore.set_ylabel('Z-score')
+                            ax_zscore.set_title('Z-score of the Spread')
+                            ax_zscore.legend()
+                            st.pyplot(fig_zscore)
+
+                        with col_plot2:
+                            st.write("### Spread with Buy and Sell Signals")
+                            fig_signal, ax_signal = plt.subplots(figsize=(10, 6))
+                            ax_signal.plot(df_pivot.index, df_pivot['spread'], label='Spread')
+                            ax_signal.plot(df_pivot.index, df_pivot['buy_signal'], '^', markersize=10, color='green', label='Buy Signal')
+                            ax_signal.plot(df_pivot.index, df_pivot['sell_signal'], 'v', markersize=10, color='red', label='Sell Signal')
+                            ax_signal.set_xlabel('Date')
+                            ax_signal.set_ylabel('Price Difference')
+                            ax_signal.set_title(f"Spread between {selected_ticker1} and {selected_ticker2} with Signals")
+                            ax_signal.legend()
+                            st.pyplot(fig_signal)
+                        # Display the cointegration test results
+                        st.write("### Cointegration Test Results")
+                        st.write(f"t-statistic: {coint_t:.4f}")
+                        st.write(f"p-value: {p_value:.4f}")
+                        st.write(f"Critical Values:")
+                        st.write(f"1%: {critical_values[0]:.4f}")
+                        st.write(f"5%: {critical_values[1]:.4f}")
+                        st.write(f"10%: {critical_values[2]:.4f}")
+
+                        if p_value < 0.05:
+                            st.success("The series are cointegrated.")
+                        else:
+                            st.warning("The series are not cointegrated.")
+
+                    else:
+                        st.error("Selected tickers are not in the data.")
+            except Exception as e:
+                st.error(f"Failed to fetch and analyze stock data: {e}")

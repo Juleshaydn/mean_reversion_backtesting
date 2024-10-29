@@ -7,3 +7,4 @@ seaborn
 matplotlib
 openai==0.28.0
 python-dotenv
+statsmodels
