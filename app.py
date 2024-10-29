@@ -27,6 +27,12 @@ if 'analysis_run' not in st.session_state:
 if 'analysis_data' not in st.session_state:
     st.session_state.analysis_data = None
 
+if 'df_pivot' not in st.session_state:
+    st.session_state.df_pivot = None
+
+if 'coint_results' not in st.session_state:
+    st.session_state.coint_results = None
+
 # Initialize session state for selected inputs
 if 'selected_ticker1' not in st.session_state:
     st.session_state.selected_ticker1 = 'AAPL'
@@ -285,9 +291,9 @@ with right_col:
             except Exception as e:
                 st.error(f"Failed to fetch and analyze stock data: {e}")
 
-    # Check if analysis has been run and data is available
+    # Perform analysis if data is available
     if st.session_state.analysis_run and st.session_state.analysis_data is not None:
-        df_stock_data = st.session_state.analysis_data
+        df_stock_data = st.session_state.analysis_data.copy()
         # Prepare data for analysis
         df_stock_data.set_index('date', inplace=True)
         # Pivot the data
@@ -314,53 +320,14 @@ with right_col:
             df_pivot['symbol1'] = selected_ticker1
             df_pivot['symbol2'] = selected_ticker2
 
-            # Create two columns for side-by-side plots
-            col_plot1, col_plot2 = st.columns(2)
+            # Store df_pivot and cointegration results in session state
+            st.session_state.df_pivot = df_pivot.copy()
+            st.session_state.coint_results = (coint_t, p_value, critical_values)
 
-            with col_plot1:
-                st.write("### Z-score of the Spread")
-                fig_zscore, ax_zscore = plt.subplots(figsize=(10, 6))
-                ax_zscore.plot(df_pivot.index, df_pivot['z_score'], label='Z-score')
-                ax_zscore.axhline(0, color='black', linestyle='--')
-                ax_zscore.axhline(1, color='red', linestyle='--')
-                ax_zscore.axhline(-1, color='green', linestyle='--')
-                ax_zscore.set_xlabel('Date')
-                ax_zscore.set_ylabel('Z-score')
-                ax_zscore.set_title('Z-score of the Spread')
-                ax_zscore.legend()
-                st.pyplot(fig_zscore)
-
-            with col_plot2:
-                st.write("### Spread with Buy and Sell Signals")
-                fig_signal, ax_signal = plt.subplots(figsize=(10, 6))
-                ax_signal.plot(df_pivot.index, df_pivot['spread'], label='Spread')
-                ax_signal.plot(df_pivot.index, df_pivot['buy_signal'], '^', markersize=10, color='green', label='Buy Signal')
-                ax_signal.plot(df_pivot.index, df_pivot['sell_signal'], 'v', markersize=10, color='red', label='Sell Signal')
-                ax_signal.set_xlabel('Date')
-                ax_signal.set_ylabel('Price Difference')
-                ax_signal.set_title(f"Spread between {selected_ticker1} and {selected_ticker2} with Signals")
-                ax_signal.legend()
-                st.pyplot(fig_signal)
-
-            # Display the cointegration test results
-            st.write("### Cointegration Test Results")
-            st.write(f"t-statistic: {coint_t:.4f}")
-            st.write(f"p-value: {p_value:.4f}")
-            st.write(f"Critical Values:")
-            st.write(f"1%: {critical_values[0]:.4f}")
-            st.write(f"5%: {critical_values[1]:.4f}")
-            st.write(f"10%: {critical_values[2]:.4f}")
-
-            if p_value < 0.05:
-                st.success("The series are cointegrated.")
-            else:
-                st.warning("The series are not cointegrated.")
-
-            # Prepare signals DataFrame
+            # Clear existing data and insert signals into the database
+            clear_signals_table()  # Clear the signals table before inserting new data
             df_pivot.reset_index(inplace=True)
-            df_pivot.rename(columns={'index': 'date'}, inplace=True)
-
-            # Combine buy and sell signals into a single DataFrame
+            # Prepare signals DataFrame
             buy_signals = df_pivot[df_pivot['buy_signal'].notnull()].copy()
             buy_signals['signal_type'] = 'buy'
             buy_signals['signal_value'] = buy_signals['buy_signal']
@@ -376,29 +343,76 @@ with right_col:
             # Calculate profits
             signals_df = calculate_profits(signals_df)
 
-            # **Clear existing data and insert signals into the database**
-            clear_signals_table()  # Clear the signals table before inserting new data
             insert_signals_to_db(signals_df)
 
             st.success("Signals and profits have been saved to the database.")
-
-            # Display the data stored in the database at the bottom of the page
-            st.write("## Data Stored in the Database")
-
-            # Fetch data from the database
-            try:
-                conn = get_db_connection()
-                query = """
-                    SELECT date, ticker1, ticker2, signal_type, spread, profit
-                    FROM signals
-                    ORDER BY date DESC;
-                """
-                df_signals_db = pd.read_sql(query, conn)
-                conn.close()
-
-                # Display the data
-                st.dataframe(df_signals_db)
-            except Exception as e:
-                st.error(f"Failed to fetch data from the database: {e}")
         else:
             st.error("Selected tickers are not in the data.")
+
+    # Display Charts and Results
+    if st.session_state.get('df_pivot') is not None:
+        df_pivot = st.session_state.df_pivot.copy()
+        coint_t, p_value, critical_values = st.session_state.coint_results
+
+        # Create two columns for side-by-side plots
+        col_plot1, col_plot2 = st.columns(2)
+
+        with col_plot1:
+            st.write("### Z-score of the Spread")
+            fig_zscore, ax_zscore = plt.subplots(figsize=(10, 6))
+            ax_zscore.plot(df_pivot.index, df_pivot['z_score'], label='Z-score')
+            ax_zscore.axhline(0, color='black', linestyle='--')
+            ax_zscore.axhline(1, color='red', linestyle='--')
+            ax_zscore.axhline(-1, color='green', linestyle='--')
+            ax_zscore.set_xlabel('Date')
+            ax_zscore.set_ylabel('Z-score')
+            ax_zscore.set_title('Z-score of the Spread')
+            ax_zscore.legend()
+            st.pyplot(fig_zscore)
+
+        with col_plot2:
+            st.write("### Spread with Buy and Sell Signals")
+            fig_signal, ax_signal = plt.subplots(figsize=(10, 6))
+            ax_signal.plot(df_pivot.index, df_pivot['spread'], label='Spread')
+            ax_signal.plot(df_pivot.index, df_pivot['buy_signal'], '^', markersize=10, color='green', label='Buy Signal')
+            ax_signal.plot(df_pivot.index, df_pivot['sell_signal'], 'v', markersize=10, color='red', label='Sell Signal')
+            ax_signal.set_xlabel('Date')
+            ax_signal.set_ylabel('Price Difference')
+            ax_signal.set_title(f"Spread between {selected_ticker1} and {selected_ticker2} with Signals")
+            ax_signal.legend()
+            st.pyplot(fig_signal)
+
+        # Display the cointegration test results
+        st.write("### Cointegration Test Results")
+        st.write(f"t-statistic: {coint_t:.4f}")
+        st.write(f"p-value: {p_value:.4f}")
+        st.write("Critical Values:")
+        st.write(f"1%: {critical_values[0]:.4f}")
+        st.write(f"5%: {critical_values[1]:.4f}")
+        st.write(f"10%: {critical_values[2]:.4f}")
+
+        if p_value < 0.05:
+            st.success("The series are cointegrated.")
+        else:
+            st.warning("The series are not cointegrated.")
+
+        # Display the data stored in the database at the bottom of the page
+        st.write("## Data Stored in the Database")
+
+        # Fetch data from the database
+        try:
+            conn = get_db_connection()
+            query = """
+                SELECT date, ticker1, ticker2, signal_type, spread, profit
+                FROM signals
+                ORDER BY date DESC;
+            """
+            df_signals_db = pd.read_sql(query, conn)
+            conn.close()
+
+            # Display the data
+            st.dataframe(df_signals_db)
+        except Exception as e:
+            st.error(f"Failed to fetch data from the database: {e}")
+    else:
+        st.info("Run analysis to display charts and results.")
