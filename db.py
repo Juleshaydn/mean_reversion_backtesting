@@ -16,7 +16,7 @@ def get_db_connection():
 def create_tables():
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Create or alter the historical_stock_data table
+    # Create the historical_stock_data table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS historical_stock_data (
         symbol VARCHAR(10),
@@ -31,6 +31,27 @@ def create_tables():
         PRIMARY KEY (symbol, date, period, interval)
     );
     """)
+
+    # Create the signals table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS signals (
+        id SERIAL PRIMARY KEY,
+        date TIMESTAMP,
+        ticker1 VARCHAR(10),
+        ticker2 VARCHAR(10),
+        signal_type VARCHAR(4),  -- 'buy' or 'sell'
+        spread REAL,
+        profit REAL
+    );
+    """)
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def clear_signals_table():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM signals;")
     conn.commit()
     cursor.close()
     conn.close()

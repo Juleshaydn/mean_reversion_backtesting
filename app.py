@@ -3,14 +3,13 @@
 import streamlit as st
 import pandas as pd
 import os
-from sqlalchemy import create_engine
 import yfinance as yf
-from db import create_tables
 import matplotlib.pyplot as plt
-from openai_chat import get_ai_response
 from dotenv import load_dotenv
 import numpy as np
-from statsmodels.tsa.stattools import coint, adfuller
+from statsmodels.tsa.stattools import coint
+from openai_chat import get_ai_response
+from db import create_tables, get_db_connection, clear_signals_table  # Import clear_signals_table
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,9 +17,39 @@ load_dotenv()
 # Initialize Streamlit page configuration
 st.set_page_config(layout="wide", page_title="Stock Data App with AI Chat")
 
-# Initialize session state for chat history
+# Initialize session state variables
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
+
+if 'analysis_run' not in st.session_state:
+    st.session_state.analysis_run = False
+
+if 'analysis_data' not in st.session_state:
+    st.session_state.analysis_data = None
+
+# Initialize session state for selected inputs
+if 'selected_ticker1' not in st.session_state:
+    st.session_state.selected_ticker1 = 'AAPL'
+
+if 'selected_ticker2' not in st.session_state:
+    st.session_state.selected_ticker2 = 'AMZN'
+
+if 'selected_period' not in st.session_state:
+    st.session_state.selected_period = '1mo'
+
+if 'selected_interval' not in st.session_state:
+    st.session_state.selected_interval = '1d'
+
+# Define periods and intervals at the top
+periods = [
+    '1d', '5d', '7d', '1mo', '3mo', '6mo',
+    '1y', '2y', '5y', '10y', 'ytd', 'max'
+]
+
+intervals = [
+    '1m', '2m', '5m', '15m', '30m', '60m', '90m',
+    '1d', '5d', '1wk', '1mo', '3mo'
+]
 
 # Create two columns: Left for AI Chat, Right for Stock Analysis
 left_col, right_col = st.columns([2, 2])
@@ -61,7 +90,7 @@ with left_col:
     st.markdown("</div>", unsafe_allow_html=True)
 
     user_input = st.text_input("Type your message:", key="user_input")
-    send_button = st.button("Send")
+    send_button = st.button("Send", key='send_button')
 
     if send_button and user_input.strip() != "":
         # Temporarily hold chat history to avoid multiple updates
@@ -106,28 +135,32 @@ with right_col:
     # List of tickers for the dropdown
     tickers = ['AAPL', 'AMZN', 'GOOG', 'MSFT', 'TSLA', 'BRK-B']
 
-    # Available periods and intervals in yfinance
-    periods = [
-        '1d', '5d', '7d', '1mo', '3mo', '6mo',
-        '1y', '2y', '5y', '10y', 'ytd', 'max'
-    ]
-
-    intervals = [
-        '1m', '2m', '5m', '15m', '30m', '60m', '90m',
-        '1d', '5d', '1wk', '1mo', '3mo'
-    ]
-
     # Select tickers, period, and interval (aligned horizontally)
     st.subheader("Select Parameters for Analysis")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        selected_ticker1 = st.selectbox("First Ticker", tickers, key='ticker1')
+        selected_ticker1 = st.selectbox(
+            "First Ticker", tickers, index=tickers.index(st.session_state.selected_ticker1), key='ticker1')
     with col2:
-        selected_ticker2 = st.selectbox("Second Ticker", tickers, key='ticker2')
+        selected_ticker2 = st.selectbox(
+            "Second Ticker", tickers, index=tickers.index(st.session_state.selected_ticker2), key='ticker2')
     with col3:
-        selected_period = st.selectbox("Period", periods, index=3, key='period_stock')  # Default to '1mo'
+        selected_period = st.selectbox(
+            "Period", periods, index=periods.index(st.session_state.selected_period), key='period_stock')
     with col4:
-        selected_interval = st.selectbox("Interval", intervals, index=7, key='interval_stock')  # Default to '1d'
+        selected_interval = st.selectbox(
+            "Interval", intervals, index=intervals.index(st.session_state.selected_interval), key='interval_stock')
+
+    # Update session state with current selections
+    st.session_state.selected_ticker1 = selected_ticker1
+    st.session_state.selected_ticker2 = selected_ticker2
+    st.session_state.selected_period = selected_period
+    st.session_state.selected_interval = selected_interval
+
+    # Validate that the selected tickers are different
+    if selected_ticker1 == selected_ticker2:
+        st.error("Please select two different tickers.")
+        st.stop()
 
     # Function to validate period and interval combination
     def validate_period_interval(period, interval):
@@ -168,6 +201,10 @@ with right_col:
             hist['symbol'] = symbol
             # Ensure the 'Date' or 'Datetime' column exists
             date_column = 'Date' if 'Date' in hist.columns else 'Datetime'
+            # Ensure the date column exists
+            if date_column not in hist.columns:
+                st.error(f"No date column found for {symbol}.")
+                continue
             hist = hist[['symbol', date_column, 'Close']]
             hist.rename(columns={
                 date_column: 'date',
@@ -178,8 +215,58 @@ with right_col:
             all_data = pd.concat([all_data, hist], ignore_index=True)
         return all_data
 
+    # Function to calculate profits
+    def calculate_profits(signals_df):
+        signals_df = signals_df.sort_values('date')
+        signals_df['profit'] = np.nan
+        position = None
+        entry_spread = None
+        entry_date = None
+
+        for index, row in signals_df.iterrows():
+            signal_type = row['signal_type']
+            date = row['date']
+            spread = row['spread']
+
+            if position is None:
+                # No position, open position
+                position = signal_type
+                entry_spread = spread
+                entry_date = date
+                signals_df.loc[index, 'profit'] = 0  # Profit is zero at entry
+            else:
+                # Close position
+                if position != signal_type:
+                    # Positions are opposite, calculate profit
+                    if position == 'buy':
+                        profit = spread - entry_spread
+                    else:
+                        profit = entry_spread - spread
+                    signals_df.loc[index, 'profit'] = profit
+                    # Reset position
+                    position = None
+                    entry_spread = None
+                    entry_date = None
+                else:
+                    # Consecutive same signals, skip
+                    signals_df.loc[index, 'profit'] = 0  # No profit change
+        return signals_df
+
+    # Function to insert signals into the database
+    def insert_signals_to_db(signals_df):
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        for index, row in signals_df.iterrows():
+            cursor.execute("""
+                INSERT INTO signals (date, ticker1, ticker2, signal_type, spread, profit)
+                VALUES (%s, %s, %s, %s, %s, %s);
+            """, (row['date'], row['symbol1'], row['symbol2'], row['signal_type'], row['spread'], row['profit']))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
     # Add a button to import and analyze data
-    if st.button("Run Analysis"):
+    if st.button("Run Analysis", key='run_analysis_button'):
         symbols = [selected_ticker1, selected_ticker2]
         # Validate period and interval combination
         invalid_combination, error_message = validate_period_interval(selected_period, selected_interval)
@@ -187,74 +274,131 @@ with right_col:
             st.error(f"Invalid combination of period and interval: {error_message}")
         else:
             try:
+                # Fetch the data
                 df_stock_data = import_stock_data(symbols, selected_period, selected_interval)
                 if df_stock_data.empty:
                     st.warning("No data found for the selected tickers. Please try different parameters.")
                 else:
-                    # Prepare data for analysis
-                    df_stock_data.set_index('date', inplace=True)
-                    # Pivot the data
-                    df_pivot = df_stock_data.pivot_table(values='close', index='date', columns='symbol')
-                    # Ensure data is aligned and drop NaN values
-                    df_pivot = df_pivot.dropna(subset=[selected_ticker1, selected_ticker2])
-
-                    # Ensure the selected symbols are in the data
-                    if selected_ticker1 in df_pivot.columns and selected_ticker2 in df_pivot.columns:
-                        # Calculate the spread
-                        df_pivot['spread'] = df_pivot[selected_ticker1] - df_pivot[selected_ticker2]
-
-                        # Calculate Z-score of the spread
-                        df_pivot['z_score'] = (df_pivot['spread'] - df_pivot['spread'].mean()) / df_pivot['spread'].std()
-
-                        # Perform cointegration test
-                        coint_t, p_value, critical_values = coint(df_pivot[selected_ticker1], df_pivot[selected_ticker2])
-
-                        # Generate buy and sell signals
-                        df_pivot['buy_signal'] = np.where(df_pivot['z_score'] <= -1, df_pivot['spread'], np.nan)
-                        df_pivot['sell_signal'] = np.where(df_pivot['z_score'] >= 1, df_pivot['spread'], np.nan)
-
-                        # Create two columns for side-by-side plots
-                        col_plot1, col_plot2 = st.columns(2)
-
-                        with col_plot1:
-                            st.write("### Z-score of the Spread")
-                            fig_zscore, ax_zscore = plt.subplots(figsize=(10, 6))
-                            ax_zscore.plot(df_pivot.index, df_pivot['z_score'], label='Z-score')
-                            ax_zscore.axhline(0, color='black', linestyle='--')
-                            ax_zscore.axhline(1, color='red', linestyle='--')
-                            ax_zscore.axhline(-1, color='green', linestyle='--')
-                            ax_zscore.set_xlabel('Date')
-                            ax_zscore.set_ylabel('Z-score')
-                            ax_zscore.set_title('Z-score of the Spread')
-                            ax_zscore.legend()
-                            st.pyplot(fig_zscore)
-
-                        with col_plot2:
-                            st.write("### Spread with Buy and Sell Signals")
-                            fig_signal, ax_signal = plt.subplots(figsize=(10, 6))
-                            ax_signal.plot(df_pivot.index, df_pivot['spread'], label='Spread')
-                            ax_signal.plot(df_pivot.index, df_pivot['buy_signal'], '^', markersize=10, color='green', label='Buy Signal')
-                            ax_signal.plot(df_pivot.index, df_pivot['sell_signal'], 'v', markersize=10, color='red', label='Sell Signal')
-                            ax_signal.set_xlabel('Date')
-                            ax_signal.set_ylabel('Price Difference')
-                            ax_signal.set_title(f"Spread between {selected_ticker1} and {selected_ticker2} with Signals")
-                            ax_signal.legend()
-                            st.pyplot(fig_signal)
-                        # Display the cointegration test results
-                        st.write("### Cointegration Test Results")
-                        st.write(f"t-statistic: {coint_t:.4f}")
-                        st.write(f"p-value: {p_value:.4f}")
-                        st.write(f"Critical Values:")
-                        st.write(f"1%: {critical_values[0]:.4f}")
-                        st.write(f"5%: {critical_values[1]:.4f}")
-                        st.write(f"10%: {critical_values[2]:.4f}")
-
-                        if p_value < 0.05:
-                            st.success("The series are cointegrated.")
-                        else:
-                            st.warning("The series are not cointegrated.")
-
-                    else:
-                        st.error("Selected tickers are not in the data.")
+                    # Store data in session state
+                    st.session_state.analysis_data = df_stock_data
+                    st.session_state.analysis_run = True
             except Exception as e:
                 st.error(f"Failed to fetch and analyze stock data: {e}")
+
+    # Check if analysis has been run and data is available
+    if st.session_state.analysis_run and st.session_state.analysis_data is not None:
+        df_stock_data = st.session_state.analysis_data
+        # Prepare data for analysis
+        df_stock_data.set_index('date', inplace=True)
+        # Pivot the data
+        df_pivot = df_stock_data.pivot_table(values='close', index='date', columns='symbol')
+        # Ensure data is aligned and drop NaN values
+        df_pivot = df_pivot.dropna(subset=[selected_ticker1, selected_ticker2])
+
+        # Ensure the selected symbols are in the data
+        if selected_ticker1 in df_pivot.columns and selected_ticker2 in df_pivot.columns:
+            # Calculate the spread
+            df_pivot['spread'] = df_pivot[selected_ticker1] - df_pivot[selected_ticker2]
+
+            # Calculate Z-score of the spread
+            df_pivot['z_score'] = (df_pivot['spread'] - df_pivot['spread'].mean()) / df_pivot['spread'].std()
+
+            # Perform cointegration test
+            coint_t, p_value, critical_values = coint(df_pivot[selected_ticker1], df_pivot[selected_ticker2])
+
+            # Generate buy and sell signals
+            df_pivot['buy_signal'] = np.where(df_pivot['z_score'] <= -1, df_pivot['spread'], np.nan)
+            df_pivot['sell_signal'] = np.where(df_pivot['z_score'] >= 1, df_pivot['spread'], np.nan)
+
+            # Add symbol columns
+            df_pivot['symbol1'] = selected_ticker1
+            df_pivot['symbol2'] = selected_ticker2
+
+            # Create two columns for side-by-side plots
+            col_plot1, col_plot2 = st.columns(2)
+
+            with col_plot1:
+                st.write("### Z-score of the Spread")
+                fig_zscore, ax_zscore = plt.subplots(figsize=(10, 6))
+                ax_zscore.plot(df_pivot.index, df_pivot['z_score'], label='Z-score')
+                ax_zscore.axhline(0, color='black', linestyle='--')
+                ax_zscore.axhline(1, color='red', linestyle='--')
+                ax_zscore.axhline(-1, color='green', linestyle='--')
+                ax_zscore.set_xlabel('Date')
+                ax_zscore.set_ylabel('Z-score')
+                ax_zscore.set_title('Z-score of the Spread')
+                ax_zscore.legend()
+                st.pyplot(fig_zscore)
+
+            with col_plot2:
+                st.write("### Spread with Buy and Sell Signals")
+                fig_signal, ax_signal = plt.subplots(figsize=(10, 6))
+                ax_signal.plot(df_pivot.index, df_pivot['spread'], label='Spread')
+                ax_signal.plot(df_pivot.index, df_pivot['buy_signal'], '^', markersize=10, color='green', label='Buy Signal')
+                ax_signal.plot(df_pivot.index, df_pivot['sell_signal'], 'v', markersize=10, color='red', label='Sell Signal')
+                ax_signal.set_xlabel('Date')
+                ax_signal.set_ylabel('Price Difference')
+                ax_signal.set_title(f"Spread between {selected_ticker1} and {selected_ticker2} with Signals")
+                ax_signal.legend()
+                st.pyplot(fig_signal)
+
+            # Display the cointegration test results
+            st.write("### Cointegration Test Results")
+            st.write(f"t-statistic: {coint_t:.4f}")
+            st.write(f"p-value: {p_value:.4f}")
+            st.write(f"Critical Values:")
+            st.write(f"1%: {critical_values[0]:.4f}")
+            st.write(f"5%: {critical_values[1]:.4f}")
+            st.write(f"10%: {critical_values[2]:.4f}")
+
+            if p_value < 0.05:
+                st.success("The series are cointegrated.")
+            else:
+                st.warning("The series are not cointegrated.")
+
+            # Prepare signals DataFrame
+            df_pivot.reset_index(inplace=True)
+            df_pivot.rename(columns={'index': 'date'}, inplace=True)
+
+            # Combine buy and sell signals into a single DataFrame
+            buy_signals = df_pivot[df_pivot['buy_signal'].notnull()].copy()
+            buy_signals['signal_type'] = 'buy'
+            buy_signals['signal_value'] = buy_signals['buy_signal']
+
+            sell_signals = df_pivot[df_pivot['sell_signal'].notnull()].copy()
+            sell_signals['signal_type'] = 'sell'
+            sell_signals['signal_value'] = sell_signals['sell_signal']
+
+            signals_df = pd.concat([buy_signals, sell_signals]).sort_values('date')
+            signals_df = signals_df[['date', 'symbol1', 'symbol2', 'spread', 'signal_type', 'signal_value']]
+            signals_df.reset_index(drop=True, inplace=True)
+
+            # Calculate profits
+            signals_df = calculate_profits(signals_df)
+
+            # **Clear existing data and insert signals into the database**
+            clear_signals_table()  # Clear the signals table before inserting new data
+            insert_signals_to_db(signals_df)
+
+            st.success("Signals and profits have been saved to the database.")
+
+            # Display the data stored in the database at the bottom of the page
+            st.write("## Data Stored in the Database")
+
+            # Fetch data from the database
+            try:
+                conn = get_db_connection()
+                query = """
+                    SELECT date, ticker1, ticker2, signal_type, spread, profit
+                    FROM signals
+                    ORDER BY date DESC;
+                """
+                df_signals_db = pd.read_sql(query, conn)
+                conn.close()
+
+                # Display the data
+                st.dataframe(df_signals_db)
+            except Exception as e:
+                st.error(f"Failed to fetch data from the database: {e}")
+        else:
+            st.error("Selected tickers are not in the data.")
