@@ -138,7 +138,7 @@ with right_col:
     st.title("Stock Mean-Reversion Analysis")
 
     # List of tickers for the dropdown
-    tickers = ['AAPL', 'AMZN', 'GOOG', 'MSFT', 'TSLA', 'BRK-B']
+    tickers = ['AAPL', 'AMZN', 'GOOG', 'MSFT', 'TSLA', 'BRK-B','BTC-USD', 'ETH-USD']
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -430,7 +430,7 @@ with right_col:
                 - Critical Values: 1%: {critical_values[0]:.4f}, 5%: {critical_values[1]:.4f}, 10%: {critical_values[2]:.4f}
                 - Expected Return: £{expected_return:.2f}
 
-                Please provide a simple analysis of this trading strategy's viability, strengths, and potential risks, making sure to include the expected return from this strategy first.
+                Please provide a simple, short analysis of this trading strategy's viability, strengths, and potential risks, making sure to include the expected return from this strategy first, then the Cointegration relationship metrics in table format.
                 """
 
                 # Get AI response
