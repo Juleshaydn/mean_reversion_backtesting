@@ -1,0 +1,40 @@
+graph TD
+    A[User Input] -->|Selects Tickers, Period, Interval| B[Streamlit Interface]
+    B -->|Passes Inputs| C[Validation Layer]
+    C -->|Validates Parameters| D{Valid?}
+    D -- Yes --> E[Fetch Data from YFinance]
+    D -- No --> F[Error Message to User]
+
+    E -->|Fetch Historical Prices| G[DataFrame with Prices]
+    G -->|Calculate Spread| H[Spread Calculation]
+    H -->|Compute Moving Average and Std Dev| I[Rolling Statistics]
+    I -->|Calculate Bollinger Bands| J[Bollinger Bands Calculation]
+    J -->|Identify Entry & Exit Points| K[Buy/Sell Signal Generator]
+    K -->|Generate Signals| L[Signals DataFrame]
+
+    L -->|Store in DB| M[(PostgreSQL Database)]
+    L -->|Display Results| N[Graphs & Charts]
+    L -->|Pass to Profit Calculator| O[Profit Calculation]
+
+    subgraph "Spread Calculation"
+        H --> H1[Spread = Price Ticker 1 - Price Ticker 2]
+    end
+
+    subgraph "Rolling Statistics"
+        I --> I1[Moving Avg = Rolling Mean Spread ]
+        I --> I2[Std Dev = Rolling Std Dev Spread ]
+    end
+
+    subgraph "Bollinger Bands Calculation"
+        J --> J1[Upper Band = Moving Avg + Std Dev * Multiplier]
+        J --> J2[Lower Band = Moving Avg - Std Dev * Multiplier]
+    end
+
+    subgraph "Signal Generation"
+        K --> K1[Buy Signal: Spread < Lower Band]
+        K --> K2[Sell Signal: Spread > Upper Band]
+    end
+
+    subgraph "Profit Calculation"
+        O --> O1[Calculate Profit/Loss for Each Signal Pair]
+    end

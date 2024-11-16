@@ -1,0 +1,35 @@
+graph TD
+    A[User Inputs] -->|User submits query| B[Streamlit Interface]
+    B -->|Triggers| C[Prompt Engineering Module]
+    
+    subgraph Prompt Engineering
+        C1[Input Formatting]
+        C2[Template Creation]
+        C3[Dynamic Data Insertion]
+    end
+    
+    C -->|Formats input| C1
+    C1 -->|Applies prompt template| C2
+    C2 -->|Injects analysis results| C3
+    C3 -->|Sends structured prompt| D[OpenAI GPT API]
+    
+    subgraph OpenAI GPT Processing
+        D1[Parses Prompt]
+        D2[Generates Contextual Response]
+    end
+    
+    D -->|Processes prompt| D1
+    D1 -->|Uses trained model| D2
+    D2 -->|Returns response| E[Streamlit Interface]
+    
+    E -->|Displays summary| F[Analysis Summary]
+    
+    subgraph Data Sources
+        G[Stock Data Processor]
+        H[Analytics Engine]
+        I[Database Signals, Historical Data]
+    end
+
+    G -->|Processed insights| C3
+    H -->|Cointegration results, Z-scores| C3
+    I -->|Signal history| C3

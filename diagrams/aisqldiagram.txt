@@ -1,0 +1,20 @@
+graph TD
+    A[User] -->|Types Prompt| B[Streamlit AI Chat Interface]
+    B -->|Sends Prompt| C[LangChain Framework]
+    C -->|Processes Prompt| D[Prompt Template]
+    D -->|Inserts Context| E[SQL Chain in LangChain]
+    E -->|Builds Query| F[SQL Database Connector]
+    F -->|Executes Query| G[(PostgreSQL Database)]
+    G -->|Returns Query Result| F
+    F -->|Formats Result| E
+    E -->|Generates AI-ready Response| H[LLM OpenAI GPT-4]
+    H -->|Processes Data| I[AI Response]
+    I -->|Returns Insights| B
+    B -->|Displays Insights| A
+
+    subgraph LangChain Workflow
+        C
+        D
+        E
+        F
+    end

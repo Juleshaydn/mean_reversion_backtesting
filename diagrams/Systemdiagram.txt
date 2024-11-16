@@ -1,0 +1,19 @@
+graph TD
+    A[User] -->|Interacts with| B[Streamlit Interface]
+    B -->|Validates Inputs| C[Validation Layer]
+    C -->|Fetches Data| D[Data Fetcher YFinance]
+    D -->|Processes Data| E[Stock Data Processor]
+    E -->|Stores Data| F[(PostgreSQL Database)]
+    F -->|Contains| G[Signals Table]
+    F -->|Contains| H[Historical Data Table]
+    E -->|Performs| I[Analytics Engine]
+    E -->|Generates| J[Bollinger Bands]
+    I -->|Stores Results| F
+    B -->|Displays| K[Graphs & Charts]
+    B -->|Uses AI| L[OpenAI Chat API]
+    L -->|Processes Input| M[AI Analysis Module]
+    M -->|Sends Insights| B
+    B -->|Runs in| N[Docker Container]
+    N -->|Orchestrated by| O[Docker Compose]
+    N -->|Served via| P[Web Server]
+    P -->|Accessible at| Q[Port 8501]
