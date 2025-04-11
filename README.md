@@ -46,9 +46,5 @@ Start by cloning the repository to your local machine:
 ```bash
 git clone https://github.com/Juleshaydn/mean_reversion_backtesting
 cd mean_reversion_backtesting
-
-<!-- Start Python Environment -->
 python3 -m venv venv 
-
-<!-- Run Dashboard in Docker -->
 docker compose up
