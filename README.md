@@ -44,5 +44,11 @@ This dashboard performs stock mean-reversion analysis using a pairs trading stra
 Start by cloning the repository to your local machine:
 
 ```bash
-git clone https://github.com/your_username/your_repository_name.git
-cd your_repository_name
+git clone https://github.com/Juleshaydn/mean_reversion_backtesting
+cd mean_reversion_backtesting
+
+<!-- Start Python Environment -->
+python3 -m venv venv 
+
+<!-- Run Dashboard in Docker -->
+docker compose up
