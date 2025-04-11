@@ -9,7 +9,7 @@ alias deactivate 'test $?_OLD_VIRTUAL_PATH != 0 && setenv PATH "$_OLD_VIRTUAL_PA
 # Unset irrelevant variables.
 deactivate nondestructive
 
-setenv VIRTUAL_ENV "/Users/julesskinner/Documents/Mac/Uni/Year 3/Final Year Project/portfolio_rebalancing/venv"
+setenv VIRTUAL_ENV "/Users/julesskinner/Documents/Documents - Jules’s MacBook Pro/Mac/Uni/Year 3/Final Year Project/portfolio_rebalancing/venv"
 
 set _OLD_VIRTUAL_PATH="$PATH"
 setenv PATH "$VIRTUAL_ENV/bin:$PATH"
